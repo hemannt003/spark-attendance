@@ -155,12 +155,22 @@
         import { GoogleGenerativeAI } from "@google/generative-ai";
 
         // 1. PASTE YOUR NEW API KEY HERE
-
-        const API_KEY = "AIzaSyAwmVLoVbgvPBUuzRGAVFwKS1PgrPtsdMs";
+        // IMPORTANT: Replace with your own API key. Never commit API keys to version control.
+        const API_KEY = "AIzaSyBGs_9o4pokdtTGbBOdIas_FOO0FoA7-0I";
 
 
         try {
-            const genAI = new GoogleGenerativeAI(API_KEY);
+            if (!API_KEY || API_KEY === 'AIzaSyBGs_9o4pokdtTGbBOdIas_FOO0FoA7-0I' || API_KEY.trim() === '') {
+                console.warn('API key not set. AI features will be disabled.');
+                window.geminiAI = {
+                    sendMessage: async function (userMessage, onChunk) {
+                        if (typeof onChunk === 'function') {
+                            onChunk('❌ API key not configured. Please set your API key in the code.');
+                        }
+                    }
+                };
+            } else {
+                const genAI = new GoogleGenerativeAI(API_KEY);
 
             const model = genAI.getGenerativeModel({ 
                 model: "gemini-2.5-flash",
@@ -170,13 +180,27 @@
 
             window.geminiAI = {
                 sendMessage: async function (userMessage, onChunk) {
-                    const result = await chat.sendMessageStream(userMessage);
-                    for await (const chunk of result.stream) {
-                        onChunk(chunk.text());
+                    try {
+                        if (!userMessage || typeof userMessage !== 'string') {
+                            throw new Error('Invalid message');
+                        }
+                        const result = await chat.sendMessageStream(userMessage);
+                        for await (const chunk of result.stream) {
+                            if (chunk && chunk.text && typeof onChunk === 'function') {
+                                onChunk(chunk.text());
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error sending message to AI:', error);
+                        if (typeof onChunk === 'function') {
+                            onChunk('❌ Error: ' + (error.message || 'Failed to get response'));
+                        }
+                        throw error;
                     }
                 }
             };
             console.log("✅ AI System Initialized");
+            }
         } catch (e) {
             console.error("AI Init Error:", e);
         }
@@ -519,16 +543,6 @@
                             <div>
                                 <label class="block text-sm font-medium text-gray-300 mb-2">College ID</label>
                                 <input type="text" id="manual-college-id" placeholder="Enter your college ID"
-                                    class="w-full px-4 py-3 rounded-lg bg-gray-700 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-300 mb-2">Course</label>
-                                <input type="text" id="manual-course" placeholder="Enter your course"
-                                    class="w-full px-4 py-3 rounded-lg bg-gray-700 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-300 mb-2">Class</label>
-                                <input type="text" id="manual-class" placeholder="Enter your class"
                                     class="w-full px-4 py-3 rounded-lg bg-gray-700 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                             </div>
                             
@@ -2544,7 +2558,7 @@
 
         // Study Materials Storage Functions
         function getStudyMaterialsStorage() {
-            return JSON.parse(localStorage.getItem('spark_study_materials') || '[]');
+            return safeParseJSON('spark_study_materials', []);
         }
 
         function saveStudyMaterialsStorage(materials) {
@@ -2745,7 +2759,7 @@
             if (!container) return;
 
             const materials = getStudyMaterialsStorage();
-            const teacherMaterials = materials.filter(m => m.uploadedBy === (loggedInUser?.username || 'Teacher'));
+            const teacherMaterials = Array.isArray(materials) ? materials.filter(m => m && m.uploadedBy === (loggedInUser?.username || 'Teacher')) : [];
 
             if (teacherMaterials.length === 0) {
                 container.innerHTML = `
@@ -2799,7 +2813,7 @@
 
             const materials = getStudyMaterialsStorage();
             // Handle both string and number IDs (materialId comes as string from onclick, but stored as number)
-            const filtered = materials.filter(m => m.id != materialId);
+            const filtered = Array.isArray(materials) ? materials.filter(m => m && m.id != materialId) : [];
             saveStudyMaterialsStorage(filtered);
             loadTeacherStudyHistory();
             showMessage("Material deleted successfully.");
@@ -2819,7 +2833,8 @@
             const studentClass = userData.course || userData.studentClass || '';
 
             const materials = getStudyMaterialsStorage();
-            let filteredMaterials = materials.filter(material => {
+            let filteredMaterials = Array.isArray(materials) ? materials.filter(material => {
+                if (!material) return false;
                 // Filter by class
                 if (classFilter !== 'all' && material.targetClass !== 'all' && material.targetClass !== classFilter) {
                     return false;
@@ -2833,7 +2848,7 @@
                     return false;
                 }
                 return true;
-            });
+            }) : [];
 
             // Filter by search term
             if (searchTerm) {
@@ -2895,7 +2910,7 @@
         window.downloadStudentMaterial = function (materialId) {
             const materials = getStudyMaterialsStorage();
             // Handle both string and number IDs
-            const material = materials.find(m => m.id == materialId || m.id === materialId);
+            const material = Array.isArray(materials) ? materials.find(m => m && (m.id == materialId || m.id === materialId)) : null;
 
             if (!material) {
                 showMessage("Material not found.");
@@ -3124,7 +3139,13 @@
                 }
 
                 // Check email-to-name mapping (set by admin)
-                const emailToNameMap = JSON.parse(localStorage.getItem('spark_email_name_map') || '{}');
+                let emailToNameMap = {};
+                try {
+                    emailToNameMap = safeParseJSON('spark_email_name_map', {});
+                } catch (err) {
+                    console.error('Error parsing emailToNameMap:', err);
+                    emailToNameMap = {};
+                }
                 if (emailToNameMap[email]) {
                     name = emailToNameMap[email];
                 }
@@ -3237,14 +3258,10 @@
             const fullnameInput = document.getElementById('manual-fullname');
             const emailInput = document.getElementById('manual-email');
             const collegeIdInput = document.getElementById('manual-college-id');
-            const courseInput = document.getElementById('manual-course');
-            const classInput = document.getElementById('manual-class');
             
             if (fullnameInput) fullnameInput.value = '';
             if (emailInput) emailInput.value = '';
             if (collegeIdInput) collegeIdInput.value = '';
-            if (courseInput) courseInput.value = '';
-            if (classInput) classInput.value = '';
             manualFaceDescriptor = null;
             manualVideoFrames = [];
         };
@@ -3411,11 +3428,9 @@
             const fullname = document.getElementById('manual-fullname')?.value.trim();
             const email = document.getElementById('manual-email')?.value.trim();
             const collegeId = document.getElementById('manual-college-id')?.value.trim();
-            const course = document.getElementById('manual-course')?.value.trim();
-            const studentClass = document.getElementById('manual-class')?.value.trim();
 
             // Validate all fields
-            if (!fullname || !email || !collegeId || !course || !studentClass) {
+            if (!fullname || !email || !collegeId) {
                 showMessage("Please fill all fields.");
                 return;
             }
@@ -3460,8 +3475,6 @@
                     name: fullname,
                     email: email,
                     id: collegeId,
-                    course: course,
-                    studentClass: studentClass,
                     descriptor: manualFaceDescriptor,
                     faceKey: uniqueFaceKey,
                     faceVideoFrames: manualVideoFrames, // Store video frames
@@ -3495,8 +3508,6 @@
                     email: email,
                     id: collegeId,
                     role: 'student',
-                    course: course,
-                    studentClass: studentClass,
                     descriptor: manualFaceDescriptor,
                     faceKey: uniqueFaceKey,
                     faceVideoFrames: manualVideoFrames, // Store video frames
@@ -3939,8 +3950,6 @@
                                 role: 'student',
                                 name: regData.fullname || existingUser?.name || pendingRegUsername,
                                 email: regData.email || existingUser?.email || '',
-                                course: regData.course || existingUser?.course || '',
-                                studentClass: regData.studentClass || existingUser?.studentClass || '',
                                 batchId: regData.batchId || existingUser?.batchId || '',
                                 faceRegisteredAt: new Date().toISOString() // Timestamp of registration
                             };
@@ -3949,7 +3958,7 @@
                             if (regData.batchId && regData.email) {
                                 let batches = [];
                                 try {
-                                    batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+                                    batches = safeParseJSON('spark_batches', []);
                                 } catch (err) {
                                     console.error('Error parsing batches:', err);
                                     batches = [];
@@ -3997,13 +4006,14 @@
                             
                             stopAllVideo();
                             
-                            showMessage("✅ Face registered successfully! (Face Key: " + uniqueFaceKey + ")");
-
                             // Clear pending data
                             delete window.pendingRegData;
                             
-                            // Don't go home, stay in attendance tab
-                            showMessage("Face registration complete! You can now mark attendance.");
+                            // Show dashboard directly after registration
+                            toggleMainApp(true);
+                            populateProfileData();
+                            updateDashboardProfile();
+                            showMessage("✅ Face registered successfully! Registration complete.");
                         } else if (livenessMode === 'login') {
                             // Perform Login Match
                             const labeled = Object.entries(registeredUsers)
@@ -4047,20 +4057,25 @@
                                 
                                 loggedInUser = {
                                     username: bestMatch.label,
-                                    descriptor: matchedUserData.descriptor
+                                    ...matchedUserData
                                 };
                                 
+                                // Show dashboard directly after login
+                                toggleMainApp(true);
+                                saveSession(loggedInUser);
+                                localStorage.setItem('spark_role', 'student');
+                                populateProfileData();
+                                updateDashboardProfile();
+                                
+                                // Update navigation elements
                                 const navUsername = document.getElementById('nav-username');
                                 const sidebarUsername = document.getElementById('sidebar-username');
                                 const sidebarId = document.getElementById('sidebar-id');
                                 
-                                if (navUsername) navUsername.textContent = bestMatch.label;
-                                if (sidebarUsername) sidebarUsername.textContent = bestMatch.label;
-                                if (sidebarId) sidebarId.textContent = (matchedUserData.id || (bestMatch.label + 'ID'));
-
-                                toggleMainApp(true);
-                                saveSession(loggedInUser);
-                                localStorage.setItem('spark_role', 'student');
+                                if (navUsername) navUsername.textContent = loggedInUser.username || bestMatch.label;
+                                if (sidebarUsername) sidebarUsername.textContent = loggedInUser.name || loggedInUser.username || bestMatch.label;
+                                if (sidebarId) sidebarId.textContent = (loggedInUser.id || matchedUserData.id || (bestMatch.label + 'ID'));
+                                
                                 showMessage("Verified & Logged In!");
                             } else {
                                 finalizeAction = false;
@@ -4161,7 +4176,7 @@
                                     // Check if matched user is in the active batch
                                     let batches = [];
                                     try {
-                                        batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+                                        batches = safeParseJSON('spark_batches', []);
                                     } catch (err) {
                                         console.error('Error parsing batches:', err);
                                         batches = [];
@@ -4172,7 +4187,7 @@
                                         // Check if already marked attendance today
                                         let log = [];
                                         try {
-                                            log = JSON.parse(localStorage.getItem('spark_attendance_log') || '[]');
+                                            log = safeParseJSON('spark_attendance_log', []);
                                         } catch (err) {
                                             console.error('Error parsing attendance log:', err);
                                             log = [];
@@ -4193,15 +4208,24 @@
                                             };
                                             saveSession(loggedInUser);
                                             
-                                            // Mark attendance automatically
+                                            // Mark attendance automatically - ONLY for this specific student
                                             const activePortalBatchName = localStorage.getItem('spark_active_attendance_portal_name') || '';
+                                            const matchedUserEmail = matchedUser.email?.toLowerCase() || '';
+                                            
+                                            // Verify student is in the active batch
+                                            if (activeBatch && matchedUserEmail && !activeBatch.students.includes(matchedUserEmail)) {
+                                                showMessage("You are not enrolled in this batch.");
+                                                return;
+                                            }
+                                            
                                             const logEntry = {
                                                 timestamp: Date.now(),
                                                 className: activePortalBatchName,
                                                 batchId: activePortalBatchId,
                                                 status: 'Present',
                                                 location: 'Verified',
-                                                student: bestMatch.label,
+                                                student: bestMatch.label, // Only this specific student
+                                                email: matchedUserEmail, // Store email for verification
                                                 faceKey: matchedUser.faceKey || 'N/A'
                                             };
                                             
@@ -4212,9 +4236,10 @@
                                                 console.error('Error saving attendance log:', err);
                                             }
                                             
-                                            // Lock attendance for 1 hour
+                                            // Use per-student locking instead of global lock
+                                            const studentLockKey = `attendance_locked_until_${bestMatch.label}`;
                                             const lockUntil = Date.now() + (60 * 60 * 1000);
-                                            localStorage.setItem('attendance_locked_until', lockUntil);
+                                            localStorage.setItem(studentLockKey, lockUntil);
                                             
                                             // Update UI
                                             updateDashboardStats();
@@ -4263,10 +4288,8 @@
         const validateRegistrationForm = () => {
             const fullname = document.getElementById('reg-fullname')?.value.trim();
             const collegeId = document.getElementById('reg-college-id')?.value.trim();
-            const course = document.getElementById('reg-course')?.value.trim();
-            const studentClass = document.getElementById('reg-class')?.value;
 
-            return fullname && collegeId && course && studentClass;
+            return fullname && collegeId;
         };
 
         // Function to start face registration flow automatically
@@ -4288,7 +4311,6 @@
                 fullname: loggedInUser.name || loggedInUser.username,
                 collegeId: loggedInUser.id || '',
                 email: loggedInUser.email || '',
-                course: loggedInUser.course || '',
                 studentClass: loggedInUser.studentClass || '',
                 batchId: loggedInUser.batchId || ''
             };
@@ -4318,22 +4340,18 @@
                 // Validate all profile fields (these may not exist if using Google OAuth flow)
                 const fullname = document.getElementById('reg-fullname')?.value.trim();
                 const collegeId = document.getElementById('reg-college-id')?.value.trim();
-                const course = document.getElementById('reg-course')?.value.trim();
-                const studentClass = document.getElementById('reg-class')?.value;
                 const email = document.getElementById('reg-email')?.value.trim();
                 const batchId = document.getElementById('reg-batch')?.value;
 
                 // If registration form fields don't exist, try to get from profile
-                if (!fullname || !collegeId || !course || !studentClass) {
+                if (!fullname || !collegeId) {
                     // Try to get from profile if registration form doesn't exist
                     const profileName = document.getElementById('profile-name')?.value.trim();
                     const profileId = document.getElementById('profile-id')?.value.trim();
-                    const profileCourse = document.getElementById('profile-course')?.value.trim();
-                    const profileClass = document.getElementById('profile-class')?.value;
                     const profileEmail = document.getElementById('profile-email')?.value.trim();
                     const profileBatch = document.getElementById('profile-batch')?.value;
                     
-                    if (profileName && profileId && profileCourse && profileClass) {
+                    if (profileName && profileId) {
                         // Check if student is added by admin (by ID) and find their key
                         let adminAddedKey = null;
                         for (const key in registeredUsers) {
@@ -4360,8 +4378,6 @@
                             fullname: profileName,
                             collegeId: profileId,
                             email: profileEmail || loggedInUser?.email || '',
-                            course: profileCourse,
-                            studentClass: profileClass,
                             batchId: profileBatch || ''
                         };
                         pendingRegUsername = adminAddedKey; // Use the admin-added key
@@ -4398,8 +4414,6 @@
                         fullname: fullname,
                         collegeId: collegeId,
                         email: email,
-                        course: course,
-                        studentClass: studentClass,
                         batchId: batchId || ''
                     };
                 }
@@ -4427,7 +4441,14 @@
         // Helper: Get Timetable (Fallback to some defaults if empty for demo)
         const getTodayTimetable = () => {
             const stored = localStorage.getItem('spark_timetable_data');
-            if (stored) return JSON.parse(stored);
+            if (stored) {
+                try {
+                    return JSON.parse(stored);
+                } catch (err) {
+                    console.error('Error parsing timetable data:', err);
+                    return [];
+                }
+            }
 
             return [];
         };
@@ -4482,7 +4503,7 @@
         const updateDashboardStats = () => {
             if (!loggedInUser || !loggedInUser.username) return;
             
-            const log = JSON.parse(localStorage.getItem('spark_attendance_log') || '[]');
+            const log = safeParseJSON('spark_attendance_log', []);
 
             // Filter log for TODAY and for CURRENT USER
             const todayStr = new Date().toDateString();
@@ -4511,7 +4532,7 @@
                 return;
             }
 
-            const log = JSON.parse(localStorage.getItem('spark_attendance_log') || '[]');
+            const log = safeParseJSON('spark_attendance_log', []);
             // Filter by student and sort recent first
             const recent = log.filter(l => l.student === loggedInUser.username)
                 .sort((a, b) => b.timestamp - a.timestamp)
@@ -4538,7 +4559,10 @@
         };
 
         const checkAttendanceLock = () => {
-            const lockedUntil = localStorage.getItem('attendance_locked_until');
+            // Use per-student locking instead of global lock
+            const currentUsername = loggedInUser?.username;
+            const studentLockKey = currentUsername ? `attendance_locked_until_${currentUsername}` : null;
+            const lockedUntil = studentLockKey ? localStorage.getItem(studentLockKey) : null;
             const timerContainer = document.getElementById('attendance-timer-container');
             const timerVal = document.getElementById('attendance-countdown');
             const lockMsg = document.getElementById('attendance-lock-msg');
@@ -4559,8 +4583,8 @@
                 let isPortalOpen = false;
                 // Portal is open if student's email is in the active batch's students array
                 if (activePortalBatchId && studentEmail) {
-                    const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-                    const activeBatch = batches.find(b => b.id === activePortalBatchId);
+                    const batches = safeParseJSON('spark_batches', []);
+                    const activeBatch = Array.isArray(batches) ? batches.find(b => b && b.id === activePortalBatchId) : null;
                     if (activeBatch && activeBatch.students && activeBatch.students.includes(studentEmail)) {
                         isPortalOpen = true;
                     }
@@ -4587,6 +4611,11 @@
 
             const now = Date.now();
             const target = parseInt(lockedUntil) || 0;
+            
+            // Only check lock for the current logged-in student
+            if (!currentUsername) {
+                return;
+            }
 
             if (now < target) {
                 // Locked
@@ -4611,7 +4640,7 @@
                 if (timerVal) timerVal.textContent = `${m}m ${s}s`;
 
                 // Get class name
-                const log = JSON.parse(localStorage.getItem('spark_attendance_log') || '[]');
+                const log = safeParseJSON('spark_attendance_log', []);
                 const last = log[log.length - 1];
                 if (last && lockMsg) lockMsg.textContent = `Class in progress: ${last.className}`;
 
@@ -4647,7 +4676,7 @@
                 }
 
                 // Check if student is in the active batch
-                const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+                const batches = safeParseJSON('spark_batches', []);
                 const activeBatch = batches.find(b => b.id === activePortalBatchId);
                 if (!activeBatch || !activeBatch.students || !activeBatch.students.includes(studentEmail)) {
                     const batchName = activeBatch ? activeBatch.name : 'selected batch';
@@ -4764,23 +4793,57 @@
                 return;
             }
             
+            // Double-check: Only mark attendance for the logged-in user
+            const currentUsername = loggedInUser.username;
+            const userData = registeredUsers[currentUsername] || {};
+            const studentEmail = userData.email?.toLowerCase() || '';
+            
             const activePortalBatchId = localStorage.getItem('spark_active_attendance_portal');
             const activePortalBatchName = localStorage.getItem('spark_active_attendance_portal_name') || '';
+            
+            // Verify student is in the active batch
+            if (activePortalBatchId && studentEmail) {
+                const batches = safeParseJSON('spark_batches', []);
+                const activeBatch = batches.find(b => b.id === activePortalBatchId);
+                if (!activeBatch || !activeBatch.students || !activeBatch.students.includes(studentEmail)) {
+                    showMessage("You are not enrolled in this batch.");
+                    return;
+                }
+            }
+            
+            // Check if already marked attendance today for this specific student
+            const log = safeParseJSON('spark_attendance_log', []);
+            const today = new Date().toDateString();
+            const alreadyMarked = log.some(entry => {
+                const entryDate = new Date(entry.timestamp).toDateString();
+                return entryDate === today && 
+                       entry.student === currentUsername && 
+                       entry.batchId === activePortalBatchId;
+            });
+            
+            if (alreadyMarked) {
+                showMessage("You have already marked attendance today.");
+                return;
+            }
+            
+            // Mark attendance ONLY for this specific student
             const logEntry = {
                 timestamp: Date.now(),
                 className: activePortalBatchName,
                 batchId: activePortalBatchId,
                 status: 'Present',
                 location: 'Verified',
-                student: loggedInUser.username
+                student: currentUsername, // Only the logged-in student
+                email: studentEmail // Store email for verification
             };
 
-            const log = JSON.parse(localStorage.getItem('spark_attendance_log') || '[]');
             log.push(logEntry);
             localStorage.setItem('spark_attendance_log', JSON.stringify(log));
 
+            // Use per-student locking instead of global lock
+            const studentLockKey = `attendance_locked_until_${currentUsername}`;
             const lockUntil = Date.now() + (60 * 60 * 1000);
-            localStorage.setItem('attendance_locked_until', lockUntil);
+            localStorage.setItem(studentLockKey, lockUntil);
 
             updateDashboardStats();
             renderRecentActivity();
@@ -4888,7 +4951,7 @@
         }
 
         // Load profile on init (after login, but for demo)
-        const savedProfile = JSON.parse(localStorage.getItem('userProfile'));
+        const savedProfile = safeParseJSON('userProfile', null);
         if (savedProfile) {
             const pName = document.getElementById('profile-name');
             const pId = document.getElementById('profile-id');
@@ -5371,8 +5434,8 @@
         }
 
         /* ===== UI wiring ===== */
-        addClassBtn.addEventListener('click', () => addClass());
-        resetBtn.addEventListener('click', () => {
+        if (addClassBtn) addClassBtn.addEventListener('click', () => addClass());
+        if (resetBtn) resetBtn.addEventListener('click', () => {
             if (!confirm('Reset all classes and inputs?')) return;
             classes = [];
             absentTeachers.clear();
@@ -5382,21 +5445,22 @@
             renderTimetableInputs();
             refreshAbsentSelect();
             renderAbsentList();
-            previewArea.style.display = 'none';
+            if (previewArea) previewArea.style.display = 'none';
         });
 
-        periodCountInput.addEventListener('change', () => renderTimetableInputs());
+        if (periodCountInput) periodCountInput.addEventListener('change', () => renderTimetableInputs());
 
-        addAbsentBtn.addEventListener('click', () => {
+        if (addAbsentBtn) addAbsentBtn.addEventListener('click', () => {
+            if (!absentTeacherSelect) return;
             const t = absentTeacherSelect.value;
             if (!t) return;
             absentTeachers.add(t);
             renderAbsentList();
         });
 
-        previewBtn.addEventListener('click', () => renderPreview());
+        if (previewBtn) previewBtn.addEventListener('click', () => renderPreview());
 
-        regenBtn.addEventListener('click', () => {
+        if (regenBtn) regenBtn.addEventListener('click', () => {
             if (classes.length === 0) { alert('Add at least one class.'); return; }
             const model = regenerateScheduleModel();
             showResult(model);
@@ -5732,8 +5796,8 @@
                 const userData = registeredUsers[loggedInUser.username];
                 const batchId = userData.batchId;
                 if (batchId) {
-                    const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-                    const batch = batches.find(b => b.id === batchId);
+                    const batches = safeParseJSON('spark_batches', []);
+                    const batch = Array.isArray(batches) ? batches.find(b => b && b.id === batchId) : null;
                     if (batch && batch.timetable) {
                         timetable = batch.timetable; // Use fresh data
                     }
@@ -5879,8 +5943,8 @@
                 const userData = registeredUsers[loggedInUser.username];
                 const batchId = userData.batchId;
                 if (batchId) {
-                    const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-                    const batch = batches.find(b => b.id === batchId);
+                    const batches = safeParseJSON('spark_batches', []);
+                    const batch = Array.isArray(batches) ? batches.find(b => b && b.id === batchId) : null;
                     if (batch && batch.timetable && document.getElementById('student-timetable-body')) {
                         renderStudentWeekTimetable(batch.timetable);
                     }
@@ -5892,14 +5956,14 @@
             // Load batch-based timetable for student - always get fresh data from localStorage
             if (loggedInUser && registeredUsers[loggedInUser.username]) {
                 // Refresh user data from localStorage to get latest batchId
-                const allUsers = JSON.parse(localStorage.getItem('registeredUsers') || '{}');
+                const allUsers = safeParseJSON('registeredUsers', {});
                 const userData = allUsers[loggedInUser.username] || registeredUsers[loggedInUser.username];
                 const batchId = userData.batchId;
                 
                 if (batchId) {
                     // Always get fresh batches data from localStorage
-                    const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-                    const batch = batches.find(b => b.id === batchId);
+                    const batches = safeParseJSON('spark_batches', []);
+                    const batch = Array.isArray(batches) ? batches.find(b => b && b.id === batchId) : null;
                     
                     if (batch && batch.timetable && Object.keys(batch.timetable).length > 0) {
                         renderStudentWeekTimetable(batch.timetable);
@@ -6281,7 +6345,7 @@
             const userData = registeredUsers[loggedInUser.username] || {};
             
             // Check email-to-name mapping (admin may have updated it)
-            const emailToNameMap = JSON.parse(localStorage.getItem('spark_email_name_map') || '{}');
+            const emailToNameMap = safeParseJSON('spark_email_name_map', {});
             let displayName = userData.name || loggedInUser.username;
             if (userData.email && emailToNameMap[userData.email]) {
                 displayName = emailToNameMap[userData.email];
@@ -6311,7 +6375,7 @@
             const batchInfo = document.getElementById('dashboard-batch-info');
             if (batchInfo) {
                 if (userData.batchId) {
-                    const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+                    const batches = safeParseJSON('spark_batches', []);
                     const batch = batches.find(b => b.id === userData.batchId);
                     if (batch) {
                         batchInfo.textContent = `Batch: ${batch.name}`;
@@ -6327,7 +6391,7 @@
             const sidebarBatch = document.getElementById('sidebar-batch');
             if (sidebarBatch) {
                 if (userData.batchId) {
-                    const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+                    const batches = safeParseJSON('spark_batches', []);
                     const batch = batches.find(b => b.id === userData.batchId);
                     if (batch) {
                         sidebarBatch.textContent = `Batch: ${batch.name}`;
@@ -6357,7 +6421,7 @@
             const batchSelect = document.getElementById('profile-batch');
             if (!batchSelect) return;
             
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const userData = loggedInUser ? registeredUsers[loggedInUser.username] : {};
             const currentBatchId = userData.batchId || '';
             
@@ -6387,8 +6451,8 @@
                 return;
             }
             
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-            const emailToBatchMap = JSON.parse(localStorage.getItem('spark_email_batch_map') || '{}');
+            const batches = safeParseJSON('spark_batches', []);
+            const emailToBatchMap = safeParseJSON('spark_email_batch_map', {});
             
             // Remove from old batch if exists
             if (emailToBatchMap[email] && emailToBatchMap[email] !== batchId) {
@@ -6502,7 +6566,7 @@
                 return;
             }
             
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const selectedBatch = batches.find(b => b.id === selectedBatchId);
             const batchName = selectedBatch ? selectedBatch.name : '';
             
@@ -6563,7 +6627,7 @@
             }
 
             // Get the batch to find its students
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === activePortalBatchId);
             
             if (!batch) {
@@ -6572,7 +6636,7 @@
             }
 
             // Get attendance log
-            const log = JSON.parse(localStorage.getItem('spark_attendance_log') || '[]');
+            const log = safeParseJSON('spark_attendance_log', []);
 
             // Filter for current portal session (last 2 hours) and batch students
             const twoHoursAgo = Date.now() - (2 * 60 * 60 * 1000);
@@ -6682,7 +6746,7 @@
             const batchSelect = document.getElementById('teacher-analysis-batch-select');
             if (!batchSelect) return;
             
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             batchSelect.innerHTML = '<option value="">All Batches</option>';
             batches.forEach(batch => {
                 const option = document.createElement('option');
@@ -6734,8 +6798,8 @@
                 return;
             }
 
-            const log = JSON.parse(localStorage.getItem('spark_attendance_log') || '[]');
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const log = safeParseJSON('spark_attendance_log', []);
+            const batches = safeParseJSON('spark_batches', []);
             
             // Filter by selected date and batch
             let filteredLog = log.filter(entry => {
@@ -6825,7 +6889,7 @@
             const batchSelect = document.getElementById('teacher-portal-batch-select');
             if (!batchSelect) return;
             
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             batchSelect.innerHTML = '<option value="">Select a batch</option>';
             batches.forEach(batch => {
                 const option = document.createElement('option');
@@ -7060,7 +7124,7 @@
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                 
                 let extractedText = '';
-                const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '{}');
+                const registeredUsers = safeParseJSON('registeredUsers', {});
                 let importedCount = 0;
 
                 // Extract text from all pages
@@ -7175,8 +7239,8 @@
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF();
                 
-                const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '{}');
-                const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+                const registeredUsers = safeParseJSON('registeredUsers', {});
+                const batches = safeParseJSON('spark_batches', []);
 
                 // Title
                 doc.setFontSize(18);
@@ -7286,10 +7350,10 @@
                 }
 
                 const results = getResultsStorage();
-                const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+                const batches = safeParseJSON('spark_batches', []);
                 const batch = batches.find(b => b.id === batchId);
-                const emailToNameMap = JSON.parse(localStorage.getItem('spark_email_name_map') || '{}');
-                const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '{}');
+                const emailToNameMap = safeParseJSON('spark_email_name_map', {});
+                const registeredUsers = safeParseJSON('registeredUsers', {});
 
                 if (!batch) {
                     showMessage("Batch not found.");
@@ -7586,7 +7650,7 @@
 
         // Attendance Aggregation
         window.renderAdminAttendance = function () {
-            const log = JSON.parse(localStorage.getItem('spark_attendance_log') || '[]');
+            const log = safeParseJSON('spark_attendance_log', []);
             const tbody = document.getElementById('admin-attendance-log-body');
             const totalCountDisplay = document.getElementById('admin-total-checkins');
 
@@ -7616,9 +7680,9 @@
         // ===== BATCH MANAGEMENT FUNCTIONS =====
         
         // Initialize batches data structure
-        let batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-        let emailToBatchMap = JSON.parse(localStorage.getItem('spark_email_batch_map') || '{}');
-        let emailToNameMap = JSON.parse(localStorage.getItem('spark_email_name_map') || '{}');
+        let batches = safeParseJSON('spark_batches', []);
+        let emailToBatchMap = safeParseJSON('spark_email_batch_map', {});
+        let emailToNameMap = safeParseJSON('spark_email_name_map', {});
 
         // Save batches to localStorage
         function saveBatches() {
@@ -7716,9 +7780,9 @@
         // Add student to batch
         window.addStudentToBatch = function () {
             // Refresh batches and maps to get latest data
-            batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-            emailToBatchMap = JSON.parse(localStorage.getItem('spark_email_batch_map') || '{}');
-            emailToNameMap = JSON.parse(localStorage.getItem('spark_email_name_map') || '{}');
+            batches = safeParseJSON('spark_batches', []);
+            emailToBatchMap = safeParseJSON('spark_email_batch_map', {});
+            emailToNameMap = safeParseJSON('spark_email_name_map', {});
             
             const batchId = document.getElementById('batch-select-student').value;
             const fullName = document.getElementById('student-full-name').value.trim();
@@ -7951,7 +8015,7 @@
             }
 
             // Refresh batches to get latest data
-            batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (!batch) return;
 
@@ -7973,7 +8037,7 @@
             if (!tbody) return;
 
             // Refresh batches from localStorage to ensure we have latest data
-            batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            batches = safeParseJSON('spark_batches', []);
 
             const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
             
@@ -8081,8 +8145,8 @@
                     if (!batchId) return;
                     
                     // Refresh batches to get latest data
-                    batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-                    const batch = batches.find(b => b.id === batchId);
+                    batches = safeParseJSON('spark_batches', []);
+                    const batch = Array.isArray(batches) ? batches.find(b => b && b.id === batchId) : null;
                     if (batch) {
                         if (!batch.timetable) batch.timetable = {};
                         batch.timetable[key] = this.value;
@@ -8101,8 +8165,8 @@
                     if (!batchId) return;
                     
                     // Refresh batches to get latest data
-                    batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-                    const batch = batches.find(b => b.id === batchId);
+                    batches = safeParseJSON('spark_batches', []);
+                    const batch = Array.isArray(batches) ? batches.find(b => b && b.id === batchId) : null;
                     if (batch) {
                         if (!batch.timetable) batch.timetable = {};
                         batch.timetable[key] = this.value;
@@ -8121,7 +8185,7 @@
             }
 
             // Refresh batches to get latest data
-            batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (!batch) {
                 showMessage("Batch not found");
@@ -8169,7 +8233,7 @@
             }
 
             // Refresh batches to get latest data
-            batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (!batch) {
                 showMessage("Batch not found");
@@ -8227,7 +8291,7 @@
             const time = timeInput.trim();
             
             // Refresh batches to get latest data
-            batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (!batch) {
                 showMessage("Batch not found");
@@ -8281,7 +8345,7 @@
             const teacherSelect = document.getElementById('teacher-batch-select');
             if (!teacherSelect) return;
             
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const options = batches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
             teacherSelect.innerHTML = '<option value="">Select Batch</option>' + options;
         }
@@ -8299,7 +8363,7 @@
             }
 
             // Always get fresh batches data from localStorage
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (!batch) return;
 
@@ -8322,7 +8386,7 @@
             if (!tbody) return;
 
             // Always get fresh timetable data from localStorage to ensure we have latest changes
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (batch && batch.timetable) {
                 timetable = batch.timetable; // Use fresh data
@@ -8422,8 +8486,8 @@
                     const time = this.dataset.time;
                     const batchId = this.dataset.batchId;
                     const key = `${day}_${time}`;
-                    const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-                    const batch = batches.find(b => b.id === batchId);
+                    const batches = safeParseJSON('spark_batches', []);
+                    const batch = Array.isArray(batches) ? batches.find(b => b && b.id === batchId) : null;
                     if (batch) {
                         if (!batch.timetable) batch.timetable = {};
                         batch.timetable[key] = this.value;
@@ -8439,8 +8503,8 @@
                     const time = this.dataset.time;
                     const batchId = this.dataset.batchId;
                     const key = `${day}_${time}_room`;
-                    const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
-                    const batch = batches.find(b => b.id === batchId);
+                    const batches = safeParseJSON('spark_batches', []);
+                    const batch = Array.isArray(batches) ? batches.find(b => b && b.id === batchId) : null;
                     if (batch) {
                         if (!batch.timetable) batch.timetable = {};
                         batch.timetable[key] = this.value;
@@ -8458,7 +8522,7 @@
                 return;
             }
 
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (!batch) {
                 showMessage("Batch not found");
@@ -8506,7 +8570,7 @@
             }
 
             // Refresh batches to get latest data
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (!batch) {
                 showMessage("Batch not found");
@@ -8564,7 +8628,7 @@
             const time = timeInput.trim();
             
             // Refresh batches to get latest data
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (!batch) {
                 showMessage("Batch not found");
@@ -8618,7 +8682,7 @@
 
         // Initialize result storage structure
         function getResultsStorage() {
-            return JSON.parse(localStorage.getItem('spark_results') || '{}');
+            return safeParseJSON('spark_results', {});
         }
 
         function saveResultsStorage(results) {
@@ -8630,7 +8694,7 @@
             const batchSelect = document.getElementById('teacher-result-batch');
             if (!batchSelect) return;
             
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             batchSelect.innerHTML = '<option value="">Select a batch</option>';
             batches.forEach(batch => {
                 const option = document.createElement('option');
@@ -8645,7 +8709,7 @@
             const batchSelect = document.getElementById('admin-result-batch');
             if (!batchSelect) return;
             
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             batchSelect.innerHTML = '<option value="">Select a batch</option>';
             batches.forEach(batch => {
                 const option = document.createElement('option');
@@ -8675,15 +8739,15 @@
                 return;
             }
 
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
             if (!batch) {
                 showMessage("Batch not found");
                 return;
             }
 
-            const emailToNameMap = JSON.parse(localStorage.getItem('spark_email_name_map') || '{}');
-            const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '{}');
+            const emailToNameMap = safeParseJSON('spark_email_name_map', {});
+            const registeredUsers = safeParseJSON('registeredUsers', {});
             
             // Get existing results for this batch/subject/exam
             const results = getResultsStorage();
@@ -8884,10 +8948,10 @@
             }
 
             const results = getResultsStorage();
-            const batches = JSON.parse(localStorage.getItem('spark_batches') || '[]');
+            const batches = safeParseJSON('spark_batches', []);
             const batch = batches.find(b => b.id === batchId);
-            const emailToNameMap = JSON.parse(localStorage.getItem('spark_email_name_map') || '{}');
-            const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '{}');
+            const emailToNameMap = safeParseJSON('spark_email_name_map', {});
+            const registeredUsers = safeParseJSON('registeredUsers', {});
 
             // Find all results for this batch
             const batchResults = [];
@@ -9062,65 +9126,84 @@
         const chatInputField = document.getElementById('gemini-input');
         const chatMessagesBox = document.getElementById('gemini-messages');
 
-        let chatIsOpen = false;
+        // Check if all required elements exist before proceeding
+        if (!chatWidget || !chatToggle || !chatSendBtn || !chatInputField || !chatMessagesBox) {
+            console.error('Gemini chat widget elements not found. Some elements may be missing from the DOM.');
+            // Exit early if elements are missing
+        } else {
+            let chatIsOpen = false;
 
-        chatToggle.addEventListener('click', () => {
-            chatIsOpen = !chatIsOpen;
-            chatWidget.style.display = chatIsOpen ? 'flex' : 'none';
-            if (chatIsOpen) chatInputField.focus();
-        });
+            chatToggle.addEventListener('click', () => {
+                chatIsOpen = !chatIsOpen;
+                chatWidget.style.display = chatIsOpen ? 'flex' : 'none';
+                if (chatIsOpen && chatInputField) chatInputField.focus();
+            });
 
-        // Close when clicking outside
-        document.addEventListener('click', (e) => {
-            if (chatIsOpen && !chatWidget.contains(e.target) && !chatToggle.contains(e.target)) {
-                chatIsOpen = false;
-                chatWidget.style.display = 'none';
-            }
-        });
+            // Close when clicking outside
+            document.addEventListener('click', (e) => {
+                if (chatIsOpen && chatWidget && chatToggle && 
+                    !chatWidget.contains(e.target) && !chatToggle.contains(e.target)) {
+                    chatIsOpen = false;
+                    chatWidget.style.display = 'none';
+                }
+            });
 
-        async function handleSendMessage() {
-            const text = chatInputField.value.trim();
-            if (!text) return;
+            async function handleSendMessage() {
+                if (!chatInputField || !chatMessagesBox || !chatSendBtn) return;
+                
+                const text = chatInputField.value.trim();
+                if (!text) return;
 
-            const userMsg = document.createElement('div');
-            userMsg.className = 'gemini-message user';
-            userMsg.textContent = text;
-            chatMessagesBox.appendChild(userMsg);
+                const userMsg = document.createElement('div');
+                userMsg.className = 'gemini-message user';
+                userMsg.textContent = text;
+                chatMessagesBox.appendChild(userMsg);
 
-            chatInputField.value = '';
-            chatSendBtn.disabled = true;
+                chatInputField.value = '';
+                chatSendBtn.disabled = true;
 
-            const aiMsg = document.createElement('div');
-            aiMsg.className = 'gemini-message assistant';
-            chatMessagesBox.appendChild(aiMsg);
+                const aiMsg = document.createElement('div');
+                aiMsg.className = 'gemini-message assistant';
+                chatMessagesBox.appendChild(aiMsg);
 
-            const typing = document.createElement('div');
-            typing.className = 'gemini-typing';
-            typing.innerHTML = '<span></span><span></span><span></span>';
-            aiMsg.appendChild(typing);
+                const typing = document.createElement('div');
+                typing.className = 'gemini-typing';
+                typing.innerHTML = '<span></span><span></span><span></span>';
+                aiMsg.appendChild(typing);
 
-            chatMessagesBox.scrollTop = chatMessagesBox.scrollHeight;
+                chatMessagesBox.scrollTop = chatMessagesBox.scrollHeight;
 
-            try {
-                let isFirstChunk = true;
-                // Calls the Streaming Brain defined in the <head>
-                await window.geminiAI.sendMessage(text, (chunkText) => {
-                    if (isFirstChunk) {
-                        typing.remove();
-                        isFirstChunk = false;
+                try {
+                    if (!window.geminiAI || typeof window.geminiAI.sendMessage !== 'function') {
+                        throw new Error('AI service not available');
                     }
-                    aiMsg.textContent += chunkText;
-                    chatMessagesBox.scrollTop = chatMessagesBox.scrollHeight;
-                });
-            } catch (error) {
-                if (typing) typing.remove();
-                aiMsg.textContent = '❌ Connection Error. Please check your API key.';
+                    let isFirstChunk = true;
+                    // Calls the Streaming Brain defined in the <head>
+                    await window.geminiAI.sendMessage(text, (chunkText) => {
+                        if (isFirstChunk && typing) {
+                            typing.remove();
+                            isFirstChunk = false;
+                        }
+                        if (aiMsg && chunkText) {
+                            aiMsg.textContent += chunkText;
+                        }
+                        if (chatMessagesBox) {
+                            chatMessagesBox.scrollTop = chatMessagesBox.scrollHeight;
+                        }
+                    });
+                } catch (error) {
+                    console.error('Chat error:', error);
+                    if (typing) typing.remove();
+                    if (aiMsg) {
+                        aiMsg.textContent = '❌ Connection Error. Please check your API key or try again later.';
+                    }
+                }
+                if (chatSendBtn) chatSendBtn.disabled = false;
             }
-            chatSendBtn.disabled = false;
-        }
 
-        chatSendBtn.onclick = handleSendMessage;
-        chatInputField.onkeypress = (e) => { if (e.key === 'Enter') handleSendMessage(); };
+            chatSendBtn.onclick = handleSendMessage;
+            chatInputField.onkeypress = (e) => { if (e.key === 'Enter') handleSendMessage(); };
+        }
     </script>
 </body>
 
